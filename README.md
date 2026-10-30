@@ -14,7 +14,7 @@ on:
     types: [opened]
 jobs:
   add:
-    uses: nalydnix/shared-workflows/.github/workflows/add-to-project.yml@v1
+    uses: nalydnix/shared-workflows/.github/workflows/add-to-project.yml@main
     with:
       project-url: https://github.com/users/nalydnix/projects/1
     secrets:
