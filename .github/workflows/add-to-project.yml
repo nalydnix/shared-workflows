@@ -1,0 +1,23 @@
+name: Add to project
+
+on:
+  workflow_call:
+    inputs:
+      project-url:
+        description: URL of the GitHub Project (v2) to add issues to
+        required: true
+        type: string
+    secrets:
+      project-token:
+        description: PAT or GitHub App token with project write access
+        required: true
+
+jobs:
+  add:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/add-to-project@v1.0.2
+        with:
+          project-url: ${{ inputs.project-url }}
+          github-token: ${{ secrets.project-token }}
