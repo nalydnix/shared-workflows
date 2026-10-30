@@ -18,5 +18,5 @@ jobs:
     with:
       project-url: https://github.com/users/nalydnix/projects/1
     secrets:
-      project-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
+      project-token: ${{ secrets.GH_PAT }}
 ```
