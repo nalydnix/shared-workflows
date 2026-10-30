@@ -1,6 +1,16 @@
 # shared-workflows
 Reusable GitHub Actions workflows and shared automation for all my repositories.
 
+## Context: the orchestrator
+
+These workflows support a multi-agent orchestrator that delivers GitHub issues end to end. The orchestrator assigns agents to an issue (dev, functional review, code review, integration, testing) and tracks progress on a GitHub Project board whose `Status` field follows this flow:
+
+Backlog -> Ready for Dev -> Dev in Progress -> Ready for FR -> FR in Progress -> Ready for Code Review -> Code Review in Progress -> Ready for Integration -> Integration In Progress -> Ready for Test -> Test In Progress -> Done
+
+Failed reviews and failed integration go back to Ready for Dev, stopped work returns to the matching Ready status, and Cancelled or Blocked can be set from any status.
+
+Agents never touch the board directly. They post comment commands on issues and PRs (`/status`, `/code-review`), and PR and deploy events move issues automatically. The workflows below turn those comments and events into Status changes. The orchestrator decides which moves are valid; the workflows only apply them.
+
 ## Workflows
 
 ### add-to-project
