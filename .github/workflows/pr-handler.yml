@@ -1,0 +1,82 @@
+name: PR handler
+
+# Called from `pull_request: [opened, closed]` and `issue_comment: [created]` workflows.
+# Moves the issues a PR closes ("Closes #N"):
+#   PR opened             -> Ready for Code Review
+#   PR merged             -> Integration In Progress
+#   /code-review pass     -> Ready for Integration
+#   /code-review fail     -> Ready for Dev
+#   /code-review dispute  -> no change (reacts with eyes only)
+on:
+  workflow_call:
+    inputs:
+      project-url:
+        required: true
+        type: string
+    secrets:
+      project-token:
+        required: true
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      status: ${{ steps.resolve.outputs.status }}
+      issues: ${{ steps.resolve.outputs.issues }}
+    steps:
+      - id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.project-token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          PR_NUMBER: ${{ github.event.pull_request.number || (github.event.issue.pull_request && github.event.issue.number) }}
+          ASSOCIATION: ${{ github.event.comment.author_association }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          STATUS=""
+          if [[ "$EVENT" == pull_request ]]; then
+            if [[ "$ACTION" == opened ]]; then STATUS="Ready for Code Review"
+            elif [[ "$ACTION" == closed && "$MERGED" == true ]]; then STATUS="Integration In Progress"
+            fi
+          elif [[ "$EVENT" == issue_comment && -n "$PR_NUMBER" && "$ASSOCIATION" =~ ^(OWNER|MEMBER|COLLABORATOR)$ ]]; then
+            first=$(head -n1 <<<"$BODY" | tr -d '\r')
+            if [[ "$first" =~ ^/code-review[[:space:]]+(pass|fail|dispute)[[:space:]]*$ ]]; then
+              case "${BASH_REMATCH[1]}" in
+                pass) STATUS="Ready for Integration" ;;
+                fail) STATUS="Ready for Dev" ;;
+                dispute) gh api "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=eyes --silent ;;
+              esac
+            fi
+          fi
+
+          ISSUES='[]'
+          if [[ -n "$STATUS" ]]; then
+            ISSUES=$(gh api graphql -f owner="${REPO%/*}" -f repo="${REPO#*/}" -F num="$PR_NUMBER" \
+              --jq '[.data.repository.pullRequest.closingIssuesReferences.nodes[].number | tostring]' -f query='
+              query($owner:String!,$repo:String!,$num:Int!){
+                repository(owner:$owner,name:$repo){ pullRequest(number:$num){
+                  closingIssuesReferences(first:20){ nodes { number } }
+                } }
+              }' | jq -c .)
+          fi
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "issues=$ISSUES" >> "$GITHUB_OUTPUT"
+
+  set-status:
+    needs: resolve
+    if: needs.resolve.outputs.status != '' && needs.resolve.outputs.issues != '[]'
+    strategy:
+      matrix:
+        issue: ${{ fromJSON(needs.resolve.outputs.issues) }}
+    uses: nalydnix/shared-workflows/.github/workflows/set-status.yml@main
+    with:
+      project-url: ${{ inputs.project-url }}
+      issue-number: ${{ matrix.issue }}
+      status: ${{ needs.resolve.outputs.status }}
+    secrets:
+      project-token: ${{ secrets.project-token }}

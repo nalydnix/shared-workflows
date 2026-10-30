@@ -1,0 +1,42 @@
+name: Issue handler
+
+# Called from an `issue_comment: [created]` workflow. Handles `/status <target status>` on issues.
+on:
+  workflow_call:
+    inputs:
+      project-url:
+        required: true
+        type: string
+    secrets:
+      project-token:
+        required: true
+
+jobs:
+  parse:
+    if: >-
+      !github.event.issue.pull_request &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      status: ${{ steps.parse.outputs.status }}
+    steps:
+      - id: parse
+        env:
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          first=$(head -n1 <<<"$BODY" | tr -d '\r')
+          if [[ "$first" =~ ^/status[[:space:]]+(.*[^[:space:]])[[:space:]]*$ ]]; then
+            echo "status=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          fi
+
+  set-status:
+    needs: parse
+    if: needs.parse.outputs.status != ''
+    uses: nalydnix/shared-workflows/.github/workflows/set-status.yml@main
+    with:
+      project-url: ${{ inputs.project-url }}
+      issue-number: ${{ github.event.issue.number }}
+      status: ${{ needs.parse.outputs.status }}
+    secrets:
+      project-token: ${{ secrets.project-token }}

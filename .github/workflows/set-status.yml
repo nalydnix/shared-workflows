@@ -1,0 +1,121 @@
+name: Set status
+
+on:
+  workflow_call:
+    inputs:
+      project-url:
+        description: URL of the GitHub Project (v2), e.g. https://github.com/users/me/projects/1
+        required: true
+        type: string
+      issue-number:
+        description: Issue to move (in the calling repository)
+        required: true
+        type: string
+      status:
+        description: Target value of the project's Status field
+        required: true
+        type: string
+    secrets:
+      project-token:
+        description: PAT or GitHub App token with project write and issue access
+        required: true
+
+jobs:
+  set-status:
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      GH_TOKEN: ${{ secrets.project-token }}
+      PROJECT_URL: ${{ inputs.project-url }}
+      ISSUE: ${{ inputs.issue-number }}
+      STATUS: ${{ inputs.status }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Move issue to target status
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          fail() {
+            echo "::error::$1"
+            gh issue comment "$ISSUE" --repo "$REPO" --body "Status change to \`$STATUS\` rejected: $1" || true
+            exit 1
+          }
+
+          if [[ "$PROJECT_URL" =~ ^https://github\.com/(users|orgs)/([^/]+)/projects/([0-9]+)/?$ ]]; then
+            [[ "${BASH_REMATCH[1]}" == users ]] && ROOT=user || ROOT=organization
+            OWNER="${BASH_REMATCH[2]}"
+            NUM="${BASH_REMATCH[3]}"
+          else
+            fail "unrecognised project URL $PROJECT_URL"
+          fi
+
+          # Project id + Status field options
+          PROJ=$(gh api graphql -f owner="$OWNER" -F num="$NUM" --jq ".data.$ROOT.projectV2" -f query='
+            query($owner:String!,$num:Int!){
+              '"$ROOT"'(login:$owner){ projectV2(number:$num){
+                id
+                field(name:"Status"){ ... on ProjectV2SingleSelectField { id options { id name } } }
+              } }
+            }')
+          [[ "$PROJ" != null ]] || fail "project not found or token cannot read it"
+          PROJECT_ID=$(jq -r .id <<<"$PROJ")
+          FIELD_ID=$(jq -r '.field.id // empty' <<<"$PROJ")
+          [[ -n "$FIELD_ID" ]] || fail "project has no single-select Status field"
+          OPTION=$(jq -c --arg s "$STATUS" '[.field.options[] | select((.name|ascii_downcase) == ($s|ascii_downcase))][0] // empty' <<<"$PROJ")
+          [[ -n "$OPTION" ]] || fail "unknown status '$STATUS'"
+          OPTION_ID=$(jq -r .id <<<"$OPTION")
+          TARGET=$(jq -r .name <<<"$OPTION")
+
+          # The issue's project item and its current status
+          ISSUE_DATA=$(gh api graphql -f owner="${REPO%/*}" -f repo="${REPO#*/}" -F num="$ISSUE" --jq .data.repository.issue -f query='
+            query($owner:String!,$repo:String!,$num:Int!){
+              repository(owner:$owner,name:$repo){ issue(number:$num){
+                id
+                projectItems(first:50){ nodes { id project { id }
+                  fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } }
+              } }
+            }')
+          [[ "$ISSUE_DATA" != null ]] || fail "issue #$ISSUE not found"
+          ITEM=$(jq -c --arg p "$PROJECT_ID" '[.projectItems.nodes[] | select(.project.id == $p)][0] // empty' <<<"$ISSUE_DATA")
+          if [[ -n "$ITEM" ]]; then
+            ITEM_ID=$(jq -r .id <<<"$ITEM")
+            CURRENT=$(jq -r '.fieldValueByName.name // ""' <<<"$ITEM")
+          else
+            ITEM_ID=$(gh api graphql -f p="$PROJECT_ID" -f c="$(jq -r .id <<<"$ISSUE_DATA")" \
+              --jq .data.addProjectV2ItemById.item.id -f query='
+              mutation($p:ID!,$c:ID!){ addProjectV2ItemById(input:{projectId:$p,contentId:$c}){ item { id } } }')
+            CURRENT=""
+          fi
+
+          if [[ "$CURRENT" == "$TARGET" ]]; then
+            echo "Issue #$ISSUE is already '$TARGET'"
+            exit 0
+          fi
+
+          # Allowed transitions: target -> statuses it may be entered from ("||" = no status yet)
+          case "$TARGET" in
+            "Open")                    FROM="||" ;;
+            "Ready for Dev")           FROM="||Open|Dev In Progress|FR In Progress|Code Review In Progress|Integration In Progress|" ;;
+            "Dev In Progress")         FROM="|Ready for Dev|" ;;
+            "Ready for FR")            FROM="|Dev In Progress|FR In Progress|" ;;
+            "FR In Progress")          FROM="|Ready for FR|" ;;
+            "Ready for Code Review")   FROM="|FR In Progress|Code Review In Progress|" ;;
+            "Code Review In Progress") FROM="|Ready for Code Review|" ;;
+            "Ready for Integration")   FROM="|Code Review In Progress|Integration In Progress|" ;;
+            "Integration In Progress") FROM="|Ready for Integration|" ;;
+            "Ready for Test")          FROM="|Integration In Progress|" ;;
+            "Test In Progress")        FROM="|Ready for Test|" ;;
+            "Done")                    FROM="|Test In Progress|" ;;
+            "Cancelled")               FROM="any" ;;
+            *)                         fail "no transition rules for '$TARGET'" ;;
+          esac
+          if [[ "$FROM" != any && "$FROM" != *"|$CURRENT|"* ]]; then
+            fail "cannot move from '${CURRENT:-(none)}' to '$TARGET'"
+          fi
+
+          gh api graphql -f p="$PROJECT_ID" -f i="$ITEM_ID" -f f="$FIELD_ID" -f o="$OPTION_ID" --silent -f query='
+            mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){
+              updateProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){ projectV2Item { id } }
+            }'
+          echo "Issue #$ISSUE: '${CURRENT:-(none)}' -> '$TARGET'"
