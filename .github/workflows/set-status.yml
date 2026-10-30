@@ -93,24 +93,26 @@ jobs:
             exit 0
           fi
 
-          # Allowed transitions: target -> statuses it may be entered from ("||" = no status yet)
-          case "$TARGET" in
-            "Open")                    FROM="||" ;;
-            "Ready for Dev")           FROM="||Open|Dev In Progress|FR In Progress|Code Review In Progress|Integration In Progress|" ;;
-            "Dev In Progress")         FROM="|Ready for Dev|" ;;
-            "Ready for FR")            FROM="|Dev In Progress|FR In Progress|" ;;
-            "FR In Progress")          FROM="|Ready for FR|" ;;
-            "Ready for Code Review")   FROM="|FR In Progress|Code Review In Progress|" ;;
-            "Code Review In Progress") FROM="|Ready for Code Review|" ;;
-            "Ready for Integration")   FROM="|Code Review In Progress|Integration In Progress|" ;;
-            "Integration In Progress") FROM="|Ready for Integration|" ;;
-            "Ready for Test")          FROM="|Integration In Progress|" ;;
-            "Test In Progress")        FROM="|Ready for Test|" ;;
-            "Done")                    FROM="|Test In Progress|" ;;
-            "Cancelled")               FROM="any" ;;
+          # Allowed transitions: target -> statuses it may be entered from ("||" = no status yet).
+          # Compared in lowercase. Cancelled and Blocked can be entered from anywhere, and
+          # any target can be entered from Blocked.
+          case "${TARGET,,}" in
+            "backlog")                 FROM="||" ;;
+            "ready for dev")           FROM="||backlog|dev in progress|fr in progress|code review in progress|integration in progress|" ;;
+            "dev in progress")         FROM="|ready for dev|" ;;
+            "ready for fr")            FROM="|dev in progress|fr in progress|" ;;
+            "fr in progress")          FROM="|ready for fr|" ;;
+            "ready for code review")   FROM="|fr in progress|code review in progress|" ;;
+            "code review in progress") FROM="|ready for code review|" ;;
+            "ready for integration")   FROM="|code review in progress|integration in progress|" ;;
+            "integration in progress") FROM="|ready for integration|" ;;
+            "ready for test")          FROM="|integration in progress|" ;;
+            "test in progress")        FROM="|ready for test|" ;;
+            "done")                    FROM="|test in progress|" ;;
+            "cancelled"|"blocked")     FROM="any" ;;
             *)                         fail "no transition rules for '$TARGET'" ;;
           esac
-          if [[ "$FROM" != any && "$FROM" != *"|$CURRENT|"* ]]; then
+          if [[ "$FROM" != any && "${CURRENT,,}" != blocked && "$FROM" != *"|${CURRENT,,}|"* ]]; then
             fail "cannot move from '${CURRENT:-(none)}' to '$TARGET'"
           fi
 

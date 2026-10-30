@@ -23,7 +23,7 @@ jobs:
 
 ### Issue status automation
 
-Moves issues through a project's `Status` field. The project needs a single-select `Status` field with options named: Open, Ready for Dev, Dev In Progress, Ready for FR, FR In Progress, Ready for Code Review, Code Review In Progress, Ready for Integration, Integration In Progress, Ready for Test, Test In Progress, Done, Cancelled.
+Moves issues through a project's `Status` field. The project needs a single-select `Status` field with options named: Backlog, Ready for Dev, Dev In Progress, Ready for FR, FR In Progress, Ready for Code Review, Code Review In Progress, Ready for Integration, Integration In Progress, Ready for Test, Test In Progress, Done, Cancelled, Blocked.
 
 | Trigger | Result |
 |---|---|
@@ -35,7 +35,7 @@ Moves issues through a project's `Status` field. The project needs a single-sele
 | PR merged | linked issues -> Integration In Progress |
 | Deploy workflow | call `set-status.yml` with -> Ready for Test |
 
-Linked issues are the ones the PR closes (`Closes #N` in the PR body). Commands only work from OWNER/MEMBER/COLLABORATOR comments. Invalid moves (for example Ready for Dev -> Done) fail the run and comment the reason on the issue; Cancelled is allowed from any status. Allowed moves follow the workflow diagram and are listed in `set-status.yml`.
+Linked issues are the ones the PR closes (`Closes #N` in the PR body). Commands only work from OWNER/MEMBER/COLLABORATOR comments. Invalid moves (for example Ready for Dev -> Done) fail the run and comment the reason on the issue; Cancelled and Blocked are allowed from any status, and any status can be entered from Blocked. Allowed moves follow the workflow diagram and are listed in `set-status.yml`.
 
 Caller workflow for each repo:
 
