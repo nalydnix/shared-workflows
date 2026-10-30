@@ -93,29 +93,6 @@ jobs:
             exit 0
           fi
 
-          # Allowed transitions: target -> statuses it may be entered from ("||" = no status yet).
-          # Compared in lowercase. Cancelled and Blocked can be entered from anywhere, and
-          # any target can be entered from Blocked.
-          case "${TARGET,,}" in
-            "backlog")                 FROM="||" ;;
-            "ready for dev")           FROM="||backlog|dev in progress|fr in progress|code review in progress|integration in progress|" ;;
-            "dev in progress")         FROM="|ready for dev|" ;;
-            "ready for fr")            FROM="|dev in progress|fr in progress|" ;;
-            "fr in progress")          FROM="|ready for fr|" ;;
-            "ready for code review")   FROM="|fr in progress|code review in progress|" ;;
-            "code review in progress") FROM="|ready for code review|" ;;
-            "ready for integration")   FROM="|code review in progress|integration in progress|" ;;
-            "integration in progress") FROM="|ready for integration|" ;;
-            "ready for test")          FROM="|integration in progress|" ;;
-            "test in progress")        FROM="|ready for test|" ;;
-            "done")                    FROM="|test in progress|" ;;
-            "cancelled"|"blocked")     FROM="any" ;;
-            *)                         fail "no transition rules for '$TARGET'" ;;
-          esac
-          if [[ "$FROM" != any && "${CURRENT,,}" != blocked && "$FROM" != *"|${CURRENT,,}|"* ]]; then
-            fail "cannot move from '${CURRENT:-(none)}' to '$TARGET'"
-          fi
-
           gh api graphql -f p="$PROJECT_ID" -f i="$ITEM_ID" -f f="$FIELD_ID" -f o="$OPTION_ID" --silent -f query='
             mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){
               updateProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){ projectV2Item { id } }
